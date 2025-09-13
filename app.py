@@ -1,11 +1,11 @@
 # ================================
 # Stock LSTM + Streamlit (PyTorch)
-# متوافق مع Windows + إصلاح SSL + RMSE fallback + تصحيح تسريب البيانات
+# Windows Compatible + SSL Fix + RMSE fallback + Data Leakage Fix
 # ================================
 import os
 import ssl
 
-# --- إصلاح SSL على Windows ---
+# --- SSL Fix for Windows ---
 os.environ["SSL_CERT_FILE"] = r"C:\certifi\cacert.pem"
 try:
     import certifi
@@ -131,17 +131,17 @@ with c7:
 run_clicked = st.button("🚀 Train & Predict")
 
 if run_clicked:
-    # 1) تحميل البيانات
+    # 1) Download data
     try:
         df = yf.download(ticker_input, start=start_date, end=end_date)
     except Exception as e:
-        st.error(f"فشل تحميل البيانات: {e}")
+        st.error(f"Failed to download data: {e}")
         st.stop()
     if df is None or df.empty:
         st.error("⚠️ No data found. Please check the symbol or the date")
         st.stop()
 
-    # 2) تجهيز الميزات
+    # 2) Prepare features
     base_cols = ["Open", "High", "Low", "Close", "Volume"]
     df = df[base_cols].dropna()
     if use_extra:
@@ -159,18 +159,18 @@ if run_clicked:
     close_idx = feature_names.index("Close")
 
     # ================================
-    # 3) تقسيم البيانات قبل الـ Scaling
+    # 3) Split data before scaling
     split = int(0.8 * len(data))
     train_data = data[:split]
     test_data  = data[split:]
 
     # ================================
-    # 4) Scaling مع منع تسريب البيانات
+    # 4) Scaling (prevent data leakage)
     scaler = MinMaxScaler()
     train_scaled = scaler.fit_transform(train_data)
     test_scaled  = scaler.transform(test_data)
 
-    # 5) إنشاء sequences
+    # 5) Create sequences
     X_train, y_train = create_sequences(train_scaled, seq_len, target_col_idx=close_idx)
     X_test, y_test   = create_sequences(test_scaled, seq_len, target_col_idx=close_idx)
 
@@ -178,7 +178,7 @@ if run_clicked:
         st.error("Sequence length too long for dataset.")
         st.stop()
 
-    # 6) Loaders
+    # 6) DataLoaders
     train_loader = DataLoader(StockDataset(X_train, y_train), batch_size=batch_size, shuffle=True)
     test_loader  = DataLoader(StockDataset(X_test, y_test), batch_size=batch_size, shuffle=False)
 
@@ -232,33 +232,10 @@ if run_clicked:
     mape = mape_np(y_test_inv, preds_inv)
     st.markdown(f"**R²:** `{r2*100:.2f}%` | **RMSE:** `{rmse:.2f}` | **MAPE:** `{mape:.2%}`")
 
-    # 10) Plot: Real vs Pred
+    # 10) Plot: Real vs Predicted
     fig, ax = plt.subplots(figsize=(12,6))
     ax.plot(range(len(y_test_inv)), y_test_inv, label="Real Close")
     ax.plot(range(len(preds_inv)), preds_inv, label="Predicted Close")
 
     # Next-day prediction
-    last_window = test_scaled[-seq_len:]
-    input_tensor = torch.tensor(last_window.reshape(1, seq_len, len(feature_names)), dtype=torch.float32).to(device)
-    with torch.no_grad():
-        next_scaled = model(input_tensor).cpu().numpy().reshape(-1)
-    next_price = invert_close_only(next_scaled)[0]
-    ax.scatter(len(y_test_inv), next_price, label="Next-day Prediction", zorder=5)
-
-    ax.set_title(f"{ticker_input} - Real vs Predicted Close")
-    ax.set_xlabel("Test set days")
-    ax.set_ylabel("Price")
-    ax.grid(True)
-    ax.legend()
-    st.pyplot(fig)
-
-    # 11) Plot: Training Loss
-    fig2, ax2 = plt.subplots(figsize=(8,4))
-    ax2.plot(range(1,len(loss_history)+1), loss_history, marker='o')
-    ax2.set_title("Training Loss")
-    ax2.set_xlabel("Epoch")
-    ax2.set_ylabel("MSE")
-    ax2.grid(True)
-    st.pyplot(fig2)
-
-    st.info(f"📌 Next-day predicted close: **{next_price:.2f}**")
+    last_window = test_scaled
